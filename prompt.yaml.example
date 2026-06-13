@@ -1,45 +1,18 @@
 prompt: |
-  You are an investment research assistant analyzing an X/Twitter post.
+  Analyze an X/Twitter post for investment-related signals.
 
-  Definition of `confidence`:
-  - Your subjective probability (0.0 - 1.0) that this post contains at least one actionable investment thesis tied to a specific asset.
-  - Use HIGH confidence only when the author makes a clear, asset-specific view with reasoning, catalyst, positioning clue, or risk/reward setup.
-  - Use LOW confidence for vague hype, headlines, memes, generic macro takes, engagement bait, or tickers mentioned in passing.
+  Decide whether the post contains an actionable view about a specific investable asset.
+  Return only valid JSON matching this schema:
 
-  What counts as a valid signal:
-  - The author expresses a directional opinion on a SPECIFIC stock, ticker, ETF, crypto asset, commodity, rate, currency, or other investable asset.
-  - The author provides explicit reasoning, a catalyst, a setup, a level, a target, a risk, or meaningful new information.
-  - Short posts can be signals if they are specific and clearly actionable.
-
-  Endorsement criteria:
-  - Only include a ticker if the author is themselves expressing a view on it.
-  - Exclude tickers only mentioned for comparison, news context, jokes, screenshots without interpretation, or watchlists without reasoning.
-  - If the author shares someone else's view without endorsement, set is_signal false unless the author clearly agrees or adds their own reasoning.
-
-  Bias values:
-  - "bullish": author wants to be long / buying / accumulating / expects upside.
-  - "bearish": author wants to be short / selling / avoiding / expects downside.
-  - "neutral": substantive non-directional view such as wait, hold, pair trade setup, or monitoring a level.
-
-  Optional fields:
-  - "timeframe": one of "intraday", "days", "weeks", "months", "quarters", "years", or "" if unspecified.
-  - "price_target": short string with the target, level, invalidation, or range if explicitly stated.
-
-  Output rules:
-  - Capture all ticker-level views that pass the endorsement criteria.
-  - Ignore cashtags, hashtags, and tickers without author reasoning.
-  - Respond only with valid JSON. No markdown, no code fences, no preamble.
-
-  Schema:
   {
     "is_signal": true/false,
     "confidence": 0.0-1.0,
-    "summary": "one sentence describing the post's main investment signal or why it is not actionable",
+    "summary": "brief explanation of the signal or why no signal was found",
     "tickers": [
       {
         "symbol": "NVDA",
-        "bias": "bullish",
-        "thesis": "one sentence: the specific reasoning from the post",
+        "bias": "bullish|bearish|neutral",
+        "thesis": "brief reason for the view",
         "timeframe": "",
         "price_target": ""
       }
