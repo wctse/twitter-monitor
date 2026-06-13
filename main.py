@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 
 LLM_MAX_POST_ATTEMPTS = 3
+DEFAULT_PROMPT_FILE = "prompt.yaml"
 
 
 def _load_config(path: str = "config.yaml") -> dict:
@@ -48,6 +49,20 @@ def _load_prompt_text(path: str) -> str:
             raise ValueError(f"Prompt file {path} must contain a 'prompt' field")
         return str(prompt).strip()
     return raw.strip()
+
+
+def _build_llm_config(cfg: dict, config_path: str = "config.yaml") -> dict:
+    llm_cfg = dict(cfg["llm"])
+    prompt = llm_cfg.get("prompt")
+    if prompt and str(prompt).strip():
+        return llm_cfg
+
+    prompt_file = llm_cfg.get("prompt_file") or DEFAULT_PROMPT_FILE
+    prompt_path = prompt_file
+    if not os.path.isabs(prompt_path):
+        prompt_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), prompt_path)
+    llm_cfg["prompt"] = _load_prompt_text(prompt_path)
+    return llm_cfg
 
 
 def _resolve_target_channel_id(cfg: dict) -> int | None:
@@ -299,15 +314,7 @@ async def main():
     config_path = "config.yaml"
     cfg = _load_config(config_path)
 
-    prompt_file = cfg.get("llm", {}).get("prompt_file")
-    if prompt_file:
-        llm_cfg = dict(cfg["llm"])
-        prompt_path = prompt_file
-        if not os.path.isabs(prompt_path):
-            prompt_path = os.path.join(os.path.dirname(config_path), prompt_path)
-        llm_cfg["prompt"] = _load_prompt_text(prompt_path)
-    else:
-        llm_cfg = cfg["llm"]
+    llm_cfg = _build_llm_config(cfg, config_path)
 
     x_cfg = dict(cfg.get("x", {}))
     x_cfg["bearer_token"] = x_cfg.get("bearer_token") or os.getenv("X_BEARER_TOKEN") or os.getenv("TWITTER_BEARER_TOKEN") or ""
