@@ -1,0 +1,48 @@
+twitter:
+  poll_interval_seconds: 900
+  max_post_chars: 12000
+  confidence_threshold: 0.7
+
+  sources:
+    - name: "Example Account"
+      username: "example"
+      enabled: true
+      confidence_threshold: 0.7
+
+x:
+  bearer_token: ""
+  base_url: "https://api.x.com/2"
+  fallback_base_url: "https://api.twitter.com/2"
+  max_results: 10
+  exclude_retweets: true
+  exclude_replies: true
+  retry_max_attempts: 3
+  retry_backoff_base_seconds: 1.0
+  retry_backoff_max_seconds: 8.0
+
+llm:
+  provider: "api"
+  base_url: "https://openrouter.ai/api/v1"
+  model: "qwen/qwen3.5-9b"
+  api_key: ""
+  timeout: 180
+  prompt_file: "prompt.yaml.example"
+
+  retry_max_attempts: 3
+  retry_backoff_base_seconds: 1.0
+  retry_backoff_max_seconds: 8.0
+  retry_backoff_jitter_seconds: 0.25
+  retry_status_codes: [408, 409, 425, 429, 500, 502, 503, 504, 529]
+
+telegram:
+  bot_token: ""
+  target_channel_id: -1003931653025
+
+admin:
+  chat_id: 115436546
+
+error_alerts:
+  enabled: true
+
+data:
+  db_path: "data/posts.db"
