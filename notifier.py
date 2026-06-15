@@ -38,13 +38,12 @@ def _format_ticker_line(t: dict) -> str:
     return f"{icon} <b>{symbol}</b> — {thesis}{suffix}"
 
 
-def _build_header(source_name: str, post_title: str, post_url: str, summary: str, confidence: float) -> str:
+def _build_header(source_name: str, post_url: str, summary: str) -> str:
     return (
-        f"📰 <b>{escape(source_name)}</b>\n"
-        f"📝 {escape(post_title)}\n"
-        f"🔗 {post_url}\n\n"
+        f"\U0001F464 <b>{escape(source_name)}</b>\n"
+        f"\U0001F517 {post_url}\n\n"
         f"<b>Summary:</b> {escape(summary)}\n\n"
-        f"<b>Investment views ({confidence:.0%} confidence):</b>"
+        f"<b>Investment views:</b>"
     )
 
 
@@ -54,11 +53,10 @@ def render_messages(
     post_url: str,
     analysis: dict,
 ) -> list[str]:
-    confidence = float(analysis.get("confidence", 0.0))
     summary = str(analysis.get("summary", ""))
     tickers = _sort_tickers(list(analysis.get("tickers", [])))
 
-    header = _build_header(source_name, post_title, post_url, summary, confidence)
+    header = _build_header(source_name, post_url, summary)
 
     if not tickers:
         return [f"{header}\n  (no specific tickers)"]

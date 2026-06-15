@@ -42,6 +42,11 @@ def test_render_single_message_under_limit():
     )
     msgs = render_messages("@source", "Post Title", "https://x.com/source/status/1", analysis)
     assert len(msgs) == 1
+    assert msgs[0].startswith("👤 <b>@source</b>")
+    assert "📰" not in msgs[0]
+    assert "📝" not in msgs[0]
+    assert "confidence" not in msgs[0]
+    assert "<b>Investment views:</b>" in msgs[0]
     assert "NVDA" in msgs[0]
     assert "INTC" in msgs[0]
     assert "⏱ months" in msgs[0]
