@@ -23,6 +23,23 @@ def _sort_tickers(tickers: list[dict]) -> list[dict]:
     return sorted(tickers, key=lambda t: _BIAS_ORDER.get(str(t.get("bias", "neutral")).lower(), 3))
 
 
+def _ticker_symbol(ticker: dict) -> str:
+    return str(ticker.get("symbol", "") or "").strip().upper()
+
+
+def _format_recent_mentions(mentions: list[dict]) -> str:
+    links = []
+    for mention in mentions:
+        name = escape(str(mention.get("source_name", "") or "").strip())
+        url = escape(str(mention.get("url", "") or "").strip(), quote=True)
+        if name and url:
+            links.append(f'<a href="{url}">{name}</a>')
+    if not links:
+        return ""
+    label = "recent mention" if len(links) == 1 else "recent mentions"
+    return f"{len(links)} {label}: {' | '.join(links)}"
+
+
 def _format_ticker_line(t: dict) -> str:
     icon = _bias_icon(str(t.get("bias", "neutral")))
     symbol = escape(str(t.get("symbol", "")))
@@ -35,16 +52,73 @@ def _format_ticker_line(t: dict) -> str:
     if price_target:
         suffix_parts.append(f"🎯 {escape(price_target)}")
     suffix = f"  ({' · '.join(suffix_parts)})" if suffix_parts else ""
-    return f"{icon} <b>{symbol}</b> — {thesis}{suffix}"
+    line = f"{icon} <b>{symbol}</b> — {thesis}{suffix}"
+    recent_mentions = _format_recent_mentions(list(t.get("recent_mentions", []) or []))
+    if recent_mentions:
+        line = f"{line}\n{recent_mentions}"
+    return line
 
 
 def _build_header(source_name: str, post_url: str, summary: str) -> str:
     return (
-        f"\U0001F464 <b>{escape(source_name)}</b>\n"
-        f"\U0001F517 {post_url}\n\n"
+        f"👤 <b>{escape(source_name)}</b>\n"
+        f"🔗 {post_url}\n\n"
         f"<b>Summary:</b> {escape(summary)}\n\n"
         f"<b>Investment views:</b>"
     )
+
+
+def _render_message_chunks(
+    source_name: str,
+    post_title: str,
+    post_url: str,
+    analysis: dict,
+) -> list[dict]:
+    summary = str(analysis.get("summary", ""))
+    tickers = _sort_tickers(list(analysis.get("tickers", [])))
+
+    header = _build_header(source_name, post_url, summary)
+
+    if not tickers:
+        return [{"text": f"{header}\n  (no specific tickers)", "symbols": []}]
+
+    ticker_entries = []
+    for ticker in tickers:
+        symbol = _ticker_symbol(ticker)
+        ticker_entries.append({"text": _format_ticker_line(ticker), "symbols": [symbol] if symbol else []})
+
+    chunks: list[dict] = []
+    current = header
+    current_symbols: list[str] = []
+    for entry in ticker_entries:
+        line = entry["text"]
+        candidate = f"{current}\n\n{line}"
+        if len(candidate) <= TELEGRAM_MAX_MESSAGE_CHARS - 32:
+            current = candidate
+            current_symbols.extend(entry["symbols"])
+            continue
+        if current == header:
+            allowance = TELEGRAM_MAX_MESSAGE_CHARS - len(header) - 4
+            truncated = line[: max(0, allowance - 3)] + "..."
+            chunks.append({"text": f"{header}\n\n{truncated}", "symbols": entry["symbols"]})
+            current = header
+            current_symbols = []
+            continue
+        chunks.append({"text": current, "symbols": current_symbols})
+        current = f"{header}\n\n{line}"
+        current_symbols = list(entry["symbols"])
+    if current and current != header:
+        chunks.append({"text": current, "symbols": current_symbols})
+    elif not chunks:
+        chunks.append({"text": header, "symbols": []})
+
+    if len(chunks) > 1:
+        total = len(chunks)
+        chunks = [
+            chunk if i == 0 else {**chunk, "text": f"<b>(continued {i + 1}/{total})</b>\n\n{chunk['text']}"}
+            for i, chunk in enumerate(chunks)
+        ]
+    return chunks
 
 
 def render_messages(
@@ -53,42 +127,7 @@ def render_messages(
     post_url: str,
     analysis: dict,
 ) -> list[str]:
-    summary = str(analysis.get("summary", ""))
-    tickers = _sort_tickers(list(analysis.get("tickers", [])))
-
-    header = _build_header(source_name, post_url, summary)
-
-    if not tickers:
-        return [f"{header}\n  (no specific tickers)"]
-
-    ticker_lines = [_format_ticker_line(t) for t in tickers]
-    messages: list[str] = []
-    current = header
-    for line in ticker_lines:
-        candidate = f"{current}\n\n{line}"
-        if len(candidate) <= TELEGRAM_MAX_MESSAGE_CHARS - 32:
-            current = candidate
-            continue
-        if current == header:
-            allowance = TELEGRAM_MAX_MESSAGE_CHARS - len(header) - 4
-            truncated = line[: max(0, allowance - 3)] + "..."
-            messages.append(f"{header}\n\n{truncated}")
-            current = header
-            continue
-        messages.append(current)
-        current = f"{header}\n\n{line}"
-    if current and current != header:
-        messages.append(current)
-    elif not messages:
-        messages.append(header)
-
-    if len(messages) > 1:
-        total = len(messages)
-        messages = [
-            msg if i == 0 else f"<b>(continued {i + 1}/{total})</b>\n\n{msg}"
-            for i, msg in enumerate(messages)
-        ]
-    return messages
+    return [chunk["text"] for chunk in _render_message_chunks(source_name, post_title, post_url, analysis)]
 
 
 def render_message(
@@ -100,6 +139,23 @@ def render_message(
     return render_messages(source_name, post_title, post_url, analysis)[0]
 
 
+def _telegram_message_url(message) -> str | None:
+    if message is None:
+        return None
+    message_id = getattr(message, "message_id", None)
+    chat = getattr(message, "chat", None)
+    if not message_id or chat is None:
+        return None
+    username = getattr(chat, "username", None)
+    if username:
+        return f"https://t.me/{str(username).lstrip('@')}/{message_id}"
+    chat_id = getattr(chat, "id", None)
+    chat_id_text = str(chat_id or "")
+    if chat_id_text.startswith("-100") and len(chat_id_text) > 4:
+        return f"https://t.me/c/{chat_id_text[4:]}/{message_id}"
+    return None
+
+
 async def send_signal(
     bot,
     target_channel_id: int | None,
@@ -107,20 +163,25 @@ async def send_signal(
     post_title: str,
     post_url: str,
     analysis: dict,
-):
+) -> dict[str, str | None]:
     if target_channel_id is None:
         logger.warning("No target channel configured — signal not sent")
-        return
+        return {}
 
-    messages = render_messages(source_name, post_title, post_url, analysis)
+    chunks = _render_message_chunks(source_name, post_title, post_url, analysis)
+    telegram_urls_by_symbol: dict[str, str | None] = {}
 
-    for msg in messages:
+    for chunk in chunks:
         try:
-            await bot.send_message(chat_id=target_channel_id, text=msg, parse_mode="HTML")
+            message = await bot.send_message(chat_id=target_channel_id, text=chunk["text"], parse_mode="HTML")
+            message_url = _telegram_message_url(message)
+            for symbol in chunk["symbols"]:
+                telegram_urls_by_symbol.setdefault(symbol, message_url)
         except Exception as e:
             logger.error("Failed to send to target_channel_id=%d: %s", target_channel_id, e)
             break
-    logger.info("Sent %d message(s) to target_channel_id=%d", len(messages), target_channel_id)
+    logger.info("Sent %d message(s) to target_channel_id=%d", len(chunks), target_channel_id)
+    return telegram_urls_by_symbol
 
 
 async def send_seed_report(

@@ -9,10 +9,12 @@ import yaml
 from analyzer import LLMAnalyzer
 from db import (
     bump_attempts,
+    get_recent_ticker_mentions,
     has_any_posts,
     init_db,
     is_processed,
     mark_processed,
+    record_signal_tickers,
 )
 from notifier import (
     send_error_alert,
@@ -292,13 +294,33 @@ async def _process_post(
 
     if is_signal and confidence >= threshold and has_tickers:
         logger.info("Signal (%.0f%%, %d ticker(s)): %s", confidence * 100, len(tickers), source_name)
-        await send_signal(
+        for ticker in tickers:
+            recent_mentions = get_recent_ticker_mentions(
+                ticker.get("symbol", ""),
+                hours=48,
+                exclude_source_id=source_id,
+                db_path=db_path,
+            )
+            if recent_mentions:
+                ticker["recent_mentions"] = recent_mentions
+        telegram_urls_by_symbol = await send_signal(
             bot=bot,
             target_channel_id=target_channel_id,
             source_name=source_name,
             post_title=post_title,
             post_url=post_url,
             analysis=result,
+        )
+        record_signal_tickers(
+            source_id=source_id,
+            source_name=source_name,
+            post_id=post_id,
+            post_url=post_url,
+            post_title=post_title,
+            published_at=post.get("published_at"),
+            tickers=tickers,
+            telegram_message_urls_by_symbol=telegram_urls_by_symbol,
+            db_path=db_path,
         )
     else:
         logger.info(

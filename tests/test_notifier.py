@@ -12,12 +12,25 @@ def _make_analysis(tickers, confidence=0.85, summary="Test summary"):
     }
 
 
+class FakeChat:
+    def __init__(self, chat_id, username=None):
+        self.id = chat_id
+        self.username = username
+
+
+class FakeMessage:
+    def __init__(self, chat_id, message_id):
+        self.chat = FakeChat(chat_id)
+        self.message_id = message_id
+
+
 class FakeBot:
     def __init__(self):
         self.sent = []
 
     async def send_message(self, **kwargs):
         self.sent.append(kwargs)
+        return FakeMessage(kwargs["chat_id"], len(self.sent))
 
 
 def test_sort_tickers_puts_neutral_last():
@@ -53,6 +66,25 @@ def test_render_single_message_under_limit():
     assert "🎯 $200" in msgs[0]
 
 
+def test_render_recent_mentions_under_ticker_line():
+    analysis = _make_analysis(
+        [
+            {
+                "symbol": "WOLF",
+                "bias": "bullish",
+                "thesis": "800 VDC acceleration",
+                "recent_mentions": [
+                    {"source_name": "Serenity", "url": "https://t.me/c/123/10"},
+                    {"source_name": "Jukan", "url": "https://x.com/jukan/status/1"},
+                ],
+            }
+        ]
+    )
+    msg = render_messages("Source", "Post", "https://x.com/source/status/2", analysis)[0]
+    assert "🟢 <b>WOLF</b> — 800 VDC acceleration" in msg
+    assert '2 recent mentions: <a href="https://t.me/c/123/10">Serenity</a> | <a href="https://x.com/jukan/status/1">Jukan</a>' in msg
+
+
 def test_render_message_splits_between_tickers_when_too_long():
     long_thesis = "x" * 1500
     analysis = _make_analysis(
@@ -74,11 +106,12 @@ def test_send_signal_sends_only_to_target_channel():
         [{"symbol": "NVDA", "bias": "bullish", "thesis": "AI demand", "timeframe": "", "price_target": ""}]
     )
 
-    asyncio.run(send_signal(bot, -1003931653025, "@source", "Post", "https://x.com/source/status/1", analysis))
+    urls_by_symbol = asyncio.run(send_signal(bot, -1003931653025, "@source", "Post", "https://x.com/source/status/1", analysis))
 
     assert len(bot.sent) == 1
     assert bot.sent[0]["chat_id"] == -1003931653025
     assert bot.sent[0]["parse_mode"] == "HTML"
+    assert urls_by_symbol == {"NVDA": "https://t.me/c/3931653025/1"}
 
 
 def test_send_signal_missing_target_channel_sends_nothing():
@@ -87,6 +120,7 @@ def test_send_signal_missing_target_channel_sends_nothing():
         [{"symbol": "NVDA", "bias": "bullish", "thesis": "AI demand", "timeframe": "", "price_target": ""}]
     )
 
-    asyncio.run(send_signal(bot, None, "@source", "Post", "https://x.com/source/status/1", analysis))
+    urls_by_symbol = asyncio.run(send_signal(bot, None, "@source", "Post", "https://x.com/source/status/1", analysis))
 
     assert bot.sent == []
+    assert urls_by_symbol == {}
