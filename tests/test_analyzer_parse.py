@@ -30,7 +30,8 @@ def test_parse_valid_response():
     raw = (
         '{"is_signal": true, "confidence": 0.85, '
         '"summary": "Long NVDA", '
-        '"tickers": [{"symbol": "nvda", "bias": "BULLISH", "thesis": "AI demand", "timeframe": "MONTHS", "price_target": "$200"}]}'
+        '"contributing_item_numbers": [2], '
+        '"tickers": [{"symbol": "nvda", "bias": "BULLISH", "thesis": "AI demand", "timeframe": "MONTHS", "price_target": "$200", "contributing_item_numbers": [2]}]}'
     )
     result = LLMAnalyzer._parse(raw)
     assert result["is_signal"] is True
@@ -39,6 +40,8 @@ def test_parse_valid_response():
     assert result["tickers"][0]["bias"] == "bullish"
     assert result["tickers"][0]["timeframe"] == "months"
     assert result["tickers"][0]["price_target"] == "$200"
+    assert result["contributing_item_numbers"] == [2]
+    assert result["tickers"][0]["contributing_item_numbers"] == [2]
 
 
 def test_parse_drops_invalid_bias_to_neutral():

@@ -241,6 +241,26 @@ def _build_batch_analysis(posts: list[dict], max_chars: int) -> tuple[str, str, 
     return (prefix + "\n\n---\n\n".join(blocks))[:max_chars], str(title), post_urls
 
 
+def _contributing_item_numbers(result: dict, tickers: list[dict], item_count: int) -> list[int]:
+    numbers = []
+    for value in result.get("contributing_item_numbers", []) or []:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= number <= item_count and number not in numbers:
+            numbers.append(number)
+    for ticker in tickers:
+        for value in ticker.get("contributing_item_numbers", []) or []:
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 1 <= number <= item_count and number not in numbers:
+                numbers.append(number)
+    return numbers or [1]
+
+
 def _mark_posts_processed(source_id: str, posts: list[dict], content_chars: int, db_path: str, skip_reason: str | None = None):
     for post in posts:
         mark_processed(
@@ -355,6 +375,9 @@ async def _process_posts(
 
     if is_signal and confidence >= threshold and has_tickers:
         logger.info("Signal (%.0f%%, %d ticker(s), %d post(s)): %s", confidence * 100, len(tickers), len(non_empty_posts), source_name)
+        contributing_numbers = _contributing_item_numbers(result, tickers, len(non_empty_posts))
+        contributing_posts = [non_empty_posts[number - 1] for number in contributing_numbers]
+        contributing_urls = [post["post_url"] for post in contributing_posts]
         for ticker in tickers:
             recent_mentions = get_recent_ticker_mentions(
                 ticker.get("symbol", ""),
@@ -369,10 +392,10 @@ async def _process_posts(
             target_channel_id=target_channel_id,
             source_name=source_name,
             post_title=post_title,
-            post_url=post_urls,
+            post_url=contributing_urls,
             analysis=result,
         )
-        for post in non_empty_posts:
+        for post in contributing_posts:
             record_signal_tickers(
                 source_id=source_id,
                 source_name=source_name,

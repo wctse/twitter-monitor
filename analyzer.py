@@ -171,6 +171,20 @@ class LLMAnalyzer:
                 stripped = re.sub(r"^```(?:json)?\s*", "", stripped)
                 stripped = re.sub(r"\s*```\s*$", "", stripped)
             result = json.loads(stripped)
+
+            def _item_numbers(value) -> list[int]:
+                if not isinstance(value, list):
+                    return []
+                numbers = []
+                for item in value:
+                    try:
+                        number = int(item)
+                    except (TypeError, ValueError):
+                        continue
+                    if number > 0 and number not in numbers:
+                        numbers.append(number)
+                return numbers
+
             tickers = []
             for t in result.get("tickers", []):
                 if not isinstance(t, dict):
@@ -188,12 +202,14 @@ class LLMAnalyzer:
                         "thesis": str(t.get("thesis", "")),
                         "timeframe": timeframe,
                         "price_target": str(t.get("price_target", "") or "").strip(),
+                        "contributing_item_numbers": _item_numbers(t.get("contributing_item_numbers")),
                     }
                 )
             return {
                 "is_signal": bool(result.get("is_signal", False)),
                 "confidence": float(result.get("confidence", 0.0)),
                 "summary": str(result.get("summary", "")),
+                "contributing_item_numbers": _item_numbers(result.get("contributing_item_numbers")),
                 "tickers": tickers,
             }
         except (json.JSONDecodeError, ValueError) as e:

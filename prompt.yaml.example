@@ -8,13 +8,15 @@ prompt: |
     "is_signal": true/false,
     "confidence": 0.0-1.0,
     "summary": "brief explanation of the signal or why no signal was found",
+    "contributing_item_numbers": [1],
     "tickers": [
       {
         "symbol": "NVDA",
         "bias": "bullish|bearish|neutral",
         "thesis": "brief reason for the view",
         "timeframe": "",
-        "price_target": ""
+        "price_target": "",
+        "contributing_item_numbers": [1]
       }
     ]
   }

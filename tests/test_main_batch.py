@@ -70,7 +70,7 @@ def test_build_batch_analysis_includes_all_posts_and_types():
     assert "Determine which items are valuable" in analysis_text
 
 
-def test_process_posts_analyzes_one_batch_and_links_all_posts(tmp_path):
+def test_process_posts_analyzes_one_batch_and_links_only_contributing_posts(tmp_path):
     db_path = str(tmp_path / "posts.db")
     init_db(db_path)
     analyzer = FakeAnalyzer(
@@ -78,11 +78,12 @@ def test_process_posts_analyzes_one_batch_and_links_all_posts(tmp_path):
             "is_signal": True,
             "confidence": 0.9,
             "summary": "Batch signal",
+            "contributing_item_numbers": [2],
             "tickers": [{"symbol": "NVDA", "bias": "bullish", "thesis": "AI demand"}],
         }
     )
     bot = FakeBot()
-    posts = [_post("1", "Long $NVDA"), _post("2", "More context on $NVDA")]
+    posts = [_post("1", "Unrelated reply"), _post("2", "More context on $NVDA")]
 
     asyncio.run(
         main._process_posts(
@@ -104,7 +105,13 @@ def test_process_posts_analyzes_one_batch_and_links_all_posts(tmp_path):
     assert "Item 1 of 2" in analyzer.calls[0][0]
     assert "Item 2 of 2" in analyzer.calls[0][0]
     assert len(bot.sent) == 1
-    assert "https://x.com/source/status/1" in bot.sent[0]["text"]
+    assert "https://x.com/source/status/1" not in bot.sent[0]["text"]
     assert "https://x.com/source/status/2" in bot.sent[0]["text"]
     assert is_processed("source", "1", db_path)
     assert is_processed("source", "2", db_path)
+
+
+def test_contributing_item_numbers_falls_back_to_first_item():
+    result = {"contributing_item_numbers": [99, "bad"], "tickers": []}
+
+    assert main._contributing_item_numbers(result, [], 2) == [1]
