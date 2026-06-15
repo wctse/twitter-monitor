@@ -25,3 +25,4 @@ def test_normalize_post_uses_cached_username_for_url():
     assert post["post_url"] == "https://x.com/example/status/999"
     assert post["title"] == "Long $NVDA because AI demand is strong"
     assert post["metrics"]["like_count"] == 10
+    assert post["referenced_tweets"] == []

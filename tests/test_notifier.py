@@ -66,6 +66,17 @@ def test_render_single_message_under_limit():
     assert "🎯 $200" in msgs[0]
 
 
+def test_render_multiple_post_links_in_header():
+    analysis = _make_analysis(
+        [{"symbol": "NVDA", "bias": "bullish", "thesis": "AI demand", "timeframe": "", "price_target": ""}]
+    )
+
+    msg = render_messages("@source", "Posts", ["https://x.com/source/status/1", "https://x.com/source/status/2"], analysis)[0]
+
+    assert "🔗 https://x.com/source/status/1" in msg
+    assert "🔗 https://x.com/source/status/2" in msg
+
+
 def test_render_recent_mentions_under_ticker_line():
     analysis = _make_analysis(
         [

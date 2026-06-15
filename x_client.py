@@ -99,6 +99,7 @@ class XAPIClient:
                 username = str(user.get("username") or "")
                 break
         post_url = f"https://x.com/{username}/status/{post_id}" if username else f"https://x.com/i/web/status/{post_id}"
+        referenced_tweets = item.get("referenced_tweets") or []
         return {
             "post_id": post_id,
             "post_url": post_url,
@@ -106,6 +107,7 @@ class XAPIClient:
             "text": text,
             "published_at": item.get("created_at"),
             "metrics": item.get("public_metrics") or {},
+            "referenced_tweets": referenced_tweets if isinstance(referenced_tweets, list) else [],
         }
 
     async def _get_json(self, path: str, params: dict | None = None) -> dict:

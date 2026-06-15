@@ -179,23 +179,80 @@ async def _scan_source(
         return
 
     logger.info("Found %d new post(s) for %s", len(new_posts), source_name)
-    for post in reversed(new_posts):
-        try:
-            await _process_post(
-                source_id=source_id,
-                source_name=source_name,
-                post=post,
-                max_chars=max_chars,
-                threshold=threshold,
-                db_path=db_path,
-                analyzer=analyzer,
-                bot=bot,
-                target_channel_id=target_channel_id,
-                admin_chat_id=admin_chat_id,
-                error_alerts_enabled=error_alerts_enabled,
-            )
-        except Exception as e:
-            logger.error("Post processing failed for %s: %s", post.get("post_url"), e, exc_info=True)
+    try:
+        await _process_posts(
+            source_id=source_id,
+            source_name=source_name,
+            posts=list(reversed(new_posts)),
+            max_chars=max_chars,
+            threshold=threshold,
+            db_path=db_path,
+            analyzer=analyzer,
+            bot=bot,
+            target_channel_id=target_channel_id,
+            admin_chat_id=admin_chat_id,
+            error_alerts_enabled=error_alerts_enabled,
+        )
+    except Exception as e:
+        urls = ", ".join(str(post.get("post_url")) for post in new_posts[:5])
+        logger.error("Batch post processing failed for %s: %s", urls, e, exc_info=True)
+
+
+def _post_kind(post: dict) -> str:
+    referenced = post.get("referenced_tweets") or []
+    types = {str(item.get("type", "")).lower() for item in referenced if isinstance(item, dict)}
+    if "retweeted" in types:
+        return "retweet"
+    if "replied_to" in types:
+        return "reply"
+    if "quoted" in types:
+        return "quote"
+    return "post"
+
+
+def _metrics_line(metrics: dict) -> str:
+    parts = [f"{k}={v}" for k, v in sorted((metrics or {}).items()) if isinstance(v, int)]
+    return ", ".join(parts)
+
+
+def _build_batch_analysis(posts: list[dict], max_chars: int) -> tuple[str, str, list[str]]:
+    post_urls = [str(post.get("post_url") or "") for post in posts if str(post.get("post_url") or "").strip()]
+    title = posts[0].get("title", "Untitled X post") if len(posts) == 1 else f"{len(posts)} X posts from one poll"
+    blocks = []
+    for index, post in enumerate(posts, start=1):
+        text = str(post.get("text") or "").strip()
+        metrics = _metrics_line(post.get("metrics") or {})
+        lines = [
+            f"Item {index} of {len(posts)}",
+            f"Type: {_post_kind(post)}",
+            f"URL: {post.get('post_url')}",
+        ]
+        if post.get("published_at"):
+            lines.append(f"Published at: {post.get('published_at')}")
+        lines.append("Text:")
+        lines.append(text)
+        if metrics:
+            lines.append(f"Public metrics: {metrics}")
+        blocks.append("\n".join(lines))
+    prefix = (
+        f"Analyze these {len(posts)} X item(s) from the same tracked user and same polling run as one combined post. "
+        "Determine which items are valuable and investment-relevant; ignore low-value replies/retweets unless they add useful context.\n\n"
+    )
+    return (prefix + "\n\n---\n\n".join(blocks))[:max_chars], str(title), post_urls
+
+
+def _mark_posts_processed(source_id: str, posts: list[dict], content_chars: int, db_path: str, skip_reason: str | None = None):
+    for post in posts:
+        mark_processed(
+            source_id=source_id,
+            post_id=post["post_id"],
+            post_url=post["post_url"],
+            post_title=post.get("title", "Untitled X post"),
+            published_at=post.get("published_at"),
+            content_chars=content_chars,
+            skip_reason=skip_reason,
+            db_path=db_path,
+        )
 
 
 async def _process_post(
@@ -211,60 +268,72 @@ async def _process_post(
     admin_chat_id: int | None,
     error_alerts_enabled: bool,
 ):
-    post_id = post["post_id"]
-    post_url = post["post_url"]
-    post_title = post.get("title", "Untitled X post")
-    post_text = str(post.get("text") or "").strip()
+    await _process_posts(
+        source_id=source_id,
+        source_name=source_name,
+        posts=[post],
+        max_chars=max_chars,
+        threshold=threshold,
+        db_path=db_path,
+        analyzer=analyzer,
+        bot=bot,
+        target_channel_id=target_channel_id,
+        admin_chat_id=admin_chat_id,
+        error_alerts_enabled=error_alerts_enabled,
+    )
 
-    if not post_text:
-        logger.warning("No text found for %s", post_url)
-        mark_processed(
-            source_id=source_id,
-            post_id=post_id,
-            post_url=post_url,
-            post_title=post_title,
-            published_at=post.get("published_at"),
-            content_chars=0,
-            skip_reason="empty_body",
-            db_path=db_path,
-        )
+
+async def _process_posts(
+    source_id: str,
+    source_name: str,
+    posts: list[dict],
+    max_chars: int,
+    threshold: float,
+    db_path: str,
+    analyzer: LLMAnalyzer,
+    bot,
+    target_channel_id: int | None,
+    admin_chat_id: int | None,
+    error_alerts_enabled: bool,
+):
+    posts = [post for post in posts if post.get("post_id")]
+    if not posts:
         return
 
-    metrics = post.get("metrics") or {}
-    metric_line = ""
-    if metrics:
-        metric_line = "\n\nPublic metrics: " + ", ".join(
-            f"{k}={v}" for k, v in sorted(metrics.items()) if isinstance(v, int)
-        )
-    analysis_text = f"{post_text}{metric_line}"[:max_chars]
+    non_empty_posts = [post for post in posts if str(post.get("text") or "").strip()]
+    if not non_empty_posts:
+        logger.warning("No text found for %d post(s) from %s", len(posts), source_name)
+        _mark_posts_processed(source_id, posts, 0, db_path, skip_reason="empty_body")
+        return
 
-    logger.info("Analyzing '%s' (%d chars)...", post_title, len(analysis_text))
+    analysis_text, post_title, post_urls = _build_batch_analysis(non_empty_posts, max_chars)
+
+    logger.info("Analyzing %d post(s) for %s (%d chars)...", len(non_empty_posts), source_name, len(analysis_text))
     result = await analyzer.analyze(analysis_text, post_title=post_title)
     if not result:
-        attempts = bump_attempts(source_id, post_id, last_error="llm_failed", db_path=db_path)
-        if attempts >= LLM_MAX_POST_ATTEMPTS:
-            logger.error("Giving up on %s after %d failed attempt(s)", post_url, attempts)
-            mark_processed(
-                source_id=source_id,
-                post_id=post_id,
-                post_url=post_url,
-                post_title=post_title,
-                published_at=post.get("published_at"),
-                content_chars=len(analysis_text),
-                skip_reason=f"llm_failed_after_{attempts}_attempts",
-                db_path=db_path,
+        attempts = [bump_attempts(source_id, post["post_id"], last_error="llm_failed", db_path=db_path) for post in non_empty_posts]
+        max_attempts = max(attempts) if attempts else 0
+        if max_attempts >= LLM_MAX_POST_ATTEMPTS:
+            logger.error("Giving up on %d post(s) from %s after %d failed attempt(s)", len(non_empty_posts), source_name, max_attempts)
+            _mark_posts_processed(
+                source_id,
+                non_empty_posts,
+                len(analysis_text),
+                db_path,
+                skip_reason=f"llm_failed_after_{max_attempts}_attempts",
             )
             await _maybe_alert(
                 bot,
                 admin_chat_id,
                 error_alerts_enabled,
-                f"LLM analysis permanently failed after {attempts} attempt(s): {source_name} — {post_url}",
+                f"LLM analysis permanently failed after {max_attempts} attempt(s): {source_name} — {', '.join(post_urls[:5])}",
             )
         else:
             logger.warning(
-                "Analysis failed for %s (post_attempts=%d/%d, consecutive=%d) — will retry next scan",
-                post_url,
-                attempts,
+                "Analysis failed for %d post(s) from %s (attempts=%d/%d, consecutive=%d) — will retry next scan",
+                len(non_empty_posts),
+                source_name,
+                max_attempts,
                 LLM_MAX_POST_ATTEMPTS,
                 analyzer.consecutive_failures,
             )
@@ -273,19 +342,11 @@ async def _process_post(
                     bot,
                     admin_chat_id,
                     error_alerts_enabled,
-                    f"LLM analysis failed {analyzer.consecutive_failures} consecutive time(s); latest: {source_name} — {post_url}",
+                    f"LLM analysis failed {analyzer.consecutive_failures} consecutive time(s); latest batch: {source_name} — {', '.join(post_urls[:5])}",
                 )
         return
 
-    mark_processed(
-        source_id=source_id,
-        post_id=post_id,
-        post_url=post_url,
-        post_title=post_title,
-        published_at=post.get("published_at"),
-        content_chars=len(analysis_text),
-        db_path=db_path,
-    )
+    _mark_posts_processed(source_id, non_empty_posts, len(analysis_text), db_path)
 
     tickers = result.get("tickers") or []
     is_signal = bool(result.get("is_signal"))
@@ -293,7 +354,7 @@ async def _process_post(
     has_tickers = len(tickers) >= 1
 
     if is_signal and confidence >= threshold and has_tickers:
-        logger.info("Signal (%.0f%%, %d ticker(s)): %s", confidence * 100, len(tickers), source_name)
+        logger.info("Signal (%.0f%%, %d ticker(s), %d post(s)): %s", confidence * 100, len(tickers), len(non_empty_posts), source_name)
         for ticker in tickers:
             recent_mentions = get_recent_ticker_mentions(
                 ticker.get("symbol", ""),
@@ -308,26 +369,28 @@ async def _process_post(
             target_channel_id=target_channel_id,
             source_name=source_name,
             post_title=post_title,
-            post_url=post_url,
+            post_url=post_urls,
             analysis=result,
         )
-        record_signal_tickers(
-            source_id=source_id,
-            source_name=source_name,
-            post_id=post_id,
-            post_url=post_url,
-            post_title=post_title,
-            published_at=post.get("published_at"),
-            tickers=tickers,
-            telegram_message_urls_by_symbol=telegram_urls_by_symbol,
-            db_path=db_path,
-        )
+        for post in non_empty_posts:
+            record_signal_tickers(
+                source_id=source_id,
+                source_name=source_name,
+                post_id=post["post_id"],
+                post_url=post["post_url"],
+                post_title=post.get("title", "Untitled X post"),
+                published_at=post.get("published_at"),
+                tickers=tickers,
+                telegram_message_urls_by_symbol=telegram_urls_by_symbol,
+                db_path=db_path,
+            )
     else:
         logger.info(
-            "No signal (is_signal=%s, %.0f%%, %d ticker(s)): %s",
+            "No signal (is_signal=%s, %.0f%%, %d ticker(s), %d post(s)): %s",
             is_signal,
             confidence * 100,
             len(tickers),
+            len(non_empty_posts),
             source_name,
         )
 

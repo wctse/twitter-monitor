@@ -59,10 +59,20 @@ def _format_ticker_line(t: dict) -> str:
     return line
 
 
-def _build_header(source_name: str, post_url: str, summary: str) -> str:
+def _format_post_links(post_url: str | list[str]) -> str:
+    if isinstance(post_url, (list, tuple)):
+        urls = [escape(str(url or "").strip(), quote=True) for url in post_url if str(url or "").strip()]
+    else:
+        urls = [escape(str(post_url or "").strip(), quote=True)] if str(post_url or "").strip() else []
+    if not urls:
+        return "🔗"
+    return "\n".join(f"🔗 {url}" for url in urls)
+
+
+def _build_header(source_name: str, post_url: str | list[str], summary: str) -> str:
     return (
         f"👤 <b>{escape(source_name)}</b>\n"
-        f"🔗 {post_url}\n\n"
+        f"{_format_post_links(post_url)}\n\n"
         f"<b>Summary:</b> {escape(summary)}\n\n"
         f"<b>Investment views:</b>"
     )
@@ -71,7 +81,7 @@ def _build_header(source_name: str, post_url: str, summary: str) -> str:
 def _render_message_chunks(
     source_name: str,
     post_title: str,
-    post_url: str,
+    post_url: str | list[str],
     analysis: dict,
 ) -> list[dict]:
     summary = str(analysis.get("summary", ""))
@@ -124,7 +134,7 @@ def _render_message_chunks(
 def render_messages(
     source_name: str,
     post_title: str,
-    post_url: str,
+    post_url: str | list[str],
     analysis: dict,
 ) -> list[str]:
     return [chunk["text"] for chunk in _render_message_chunks(source_name, post_title, post_url, analysis)]
@@ -133,7 +143,7 @@ def render_messages(
 def render_message(
     source_name: str,
     post_title: str,
-    post_url: str,
+    post_url: str | list[str],
     analysis: dict,
 ) -> str:
     return render_messages(source_name, post_title, post_url, analysis)[0]
@@ -161,7 +171,7 @@ async def send_signal(
     target_channel_id: int | None,
     source_name: str,
     post_title: str,
-    post_url: str,
+    post_url: str | list[str],
     analysis: dict,
 ) -> dict[str, str | None]:
     if target_channel_id is None:
