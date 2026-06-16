@@ -1,7 +1,8 @@
 import asyncio
+from datetime import datetime, timezone
 
 import main
-from db import init_db, is_processed
+from db import init_db, is_processed, record_signal_tickers
 
 
 class FakeAnalyzer:
@@ -108,6 +109,96 @@ def test_process_posts_analyzes_one_batch_and_links_only_contributing_posts(tmp_
     assert "https://x.com/source/status/1" not in bot.sent[0]["text"]
     assert "https://x.com/source/status/2" in bot.sent[0]["text"]
     assert is_processed("source", "1", db_path)
+    assert is_processed("source", "2", db_path)
+
+
+def test_process_posts_removes_ticker_views_repeated_by_same_author_and_direction(tmp_path):
+    db_path = str(tmp_path / "posts.db")
+    init_db(db_path)
+    record_signal_tickers(
+        source_id="source",
+        source_name="Source",
+        post_id="old",
+        post_url="https://x.com/source/status/old",
+        post_title="Old post",
+        published_at=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        tickers=[{"symbol": "NVDA", "bias": "bullish"}],
+        db_path=db_path,
+    )
+    analyzer = FakeAnalyzer(
+        {
+            "is_signal": True,
+            "confidence": 0.9,
+            "summary": "Batch signal",
+            "tickers": [
+                {"symbol": "NVDA", "bias": "bullish", "thesis": "Repeated AI demand"},
+                {"symbol": "TSLA", "bias": "bearish", "thesis": "Margin pressure"},
+            ],
+        }
+    )
+    bot = FakeBot()
+
+    asyncio.run(
+        main._process_posts(
+            source_id="source",
+            source_name="Source",
+            posts=[_post("2", "Long $NVDA but short $TSLA")],
+            max_chars=12000,
+            threshold=0.7,
+            db_path=db_path,
+            analyzer=analyzer,
+            bot=bot,
+            target_channel_id=-1003931653025,
+            admin_chat_id=None,
+            error_alerts_enabled=True,
+        )
+    )
+
+    assert len(bot.sent) == 1
+    assert "NVDA" not in bot.sent[0]["text"]
+    assert "TSLA" in bot.sent[0]["text"]
+
+
+def test_process_posts_sends_nothing_when_all_views_are_removed_by_cooldown(tmp_path):
+    db_path = str(tmp_path / "posts.db")
+    init_db(db_path)
+    record_signal_tickers(
+        source_id="source",
+        source_name="Source",
+        post_id="old",
+        post_url="https://x.com/source/status/old",
+        post_title="Old post",
+        published_at=datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        tickers=[{"symbol": "NVDA", "bias": "bullish"}],
+        db_path=db_path,
+    )
+    analyzer = FakeAnalyzer(
+        {
+            "is_signal": True,
+            "confidence": 0.9,
+            "summary": "Batch signal",
+            "tickers": [{"symbol": "NVDA", "bias": "bullish", "thesis": "Repeated AI demand"}],
+        }
+    )
+    bot = FakeBot()
+
+    asyncio.run(
+        main._process_posts(
+            source_id="source",
+            source_name="Source",
+            posts=[_post("2", "Long $NVDA again")],
+            max_chars=12000,
+            threshold=0.7,
+            db_path=db_path,
+            analyzer=analyzer,
+            bot=bot,
+            target_channel_id=-1003931653025,
+            admin_chat_id=None,
+            error_alerts_enabled=True,
+        )
+    )
+
+    assert bot.sent == []
     assert is_processed("source", "2", db_path)
 
 

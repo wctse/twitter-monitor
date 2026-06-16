@@ -196,6 +196,37 @@ def get_recent_ticker_mentions(
         conn.close()
 
 
+def has_recent_author_ticker_direction(
+    source_id: str,
+    ticker_symbol: str,
+    bias: str,
+    hours: int = 48,
+    db_path: str = _DB_PATH,
+) -> bool:
+    source = str(source_id or "").strip().lower()
+    symbol = str(ticker_symbol or "").strip().upper()
+    direction = str(bias or "").strip().lower()
+    if not source or not symbol or direction not in ("bullish", "bearish"):
+        return False
+    conn = _connect(db_path)
+    try:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM signal_tickers
+            WHERE LOWER(source_id) = ?
+              AND UPPER(ticker_symbol) = ?
+              AND LOWER(COALESCE(bias, '')) = ?
+              AND COALESCE(datetime(published_at), created_at) >= datetime(CURRENT_TIMESTAMP, ?)
+            LIMIT 1
+            """,
+            (source, symbol, direction, f"-{int(hours)} hours"),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def record_signal_tickers(
     source_id: str,
     source_name: str,

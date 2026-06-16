@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from db import get_recent_ticker_mentions, init_db, record_signal_tickers
+from db import get_recent_ticker_mentions, has_recent_author_ticker_direction, init_db, record_signal_tickers
 
 
 def _iso(dt):
@@ -68,3 +68,44 @@ def test_recent_ticker_mentions_falls_back_to_twitter_url(tmp_path):
     mentions = get_recent_ticker_mentions("LITE", db_path=db_path)
 
     assert mentions == [{"source_name": "Jukan", "url": "https://x.com/jukan/status/1"}]
+
+
+def test_has_recent_author_ticker_direction_matches_same_author_symbol_and_direction(tmp_path):
+    db_path = str(tmp_path / "posts.db")
+    init_db(db_path)
+    now = datetime.now(timezone.utc)
+
+    record_signal_tickers(
+        source_id="jukan",
+        source_name="Jukan",
+        post_id="1",
+        post_url="https://x.com/jukan/status/1",
+        post_title="Post 1",
+        published_at=_iso(now - timedelta(hours=1)),
+        tickers=[{"symbol": "NVDA", "bias": "bullish"}],
+        db_path=db_path,
+    )
+
+    assert has_recent_author_ticker_direction("JUKAN", "nvda", "BULLISH", db_path=db_path)
+    assert not has_recent_author_ticker_direction("jukan", "NVDA", "bearish", db_path=db_path)
+    assert not has_recent_author_ticker_direction("other", "NVDA", "bullish", db_path=db_path)
+
+
+def test_has_recent_author_ticker_direction_ignores_old_mentions_and_neutral(tmp_path):
+    db_path = str(tmp_path / "posts.db")
+    init_db(db_path)
+    now = datetime.now(timezone.utc)
+
+    record_signal_tickers(
+        source_id="jukan",
+        source_name="Jukan",
+        post_id="1",
+        post_url="https://x.com/jukan/status/1",
+        post_title="Post 1",
+        published_at=_iso(now - timedelta(hours=49)),
+        tickers=[{"symbol": "NVDA", "bias": "bullish"}],
+        db_path=db_path,
+    )
+
+    assert not has_recent_author_ticker_direction("jukan", "NVDA", "bullish", db_path=db_path)
+    assert not has_recent_author_ticker_direction("jukan", "NVDA", "neutral", db_path=db_path)

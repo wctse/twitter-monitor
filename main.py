@@ -10,6 +10,7 @@ from analyzer import LLMAnalyzer
 from db import (
     bump_attempts,
     get_recent_ticker_mentions,
+    has_recent_author_ticker_direction,
     has_any_posts,
     init_db,
     is_processed,
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 LLM_MAX_POST_ATTEMPTS = 3
 DEFAULT_PROMPT_FILE = "prompt.yaml"
+DEFAULT_TICKER_COOLDOWN_HOURS = 48
 
 
 def _load_config(path: str = "config.yaml") -> dict:
@@ -261,6 +263,21 @@ def _contributing_item_numbers(result: dict, tickers: list[dict], item_count: in
     return numbers or [1]
 
 
+def _filter_cooldown_tickers(source_id: str, tickers: list[dict], cooldown_hours: int, db_path: str) -> list[dict]:
+    filtered = []
+    skipped = []
+    for ticker in tickers:
+        symbol = str(ticker.get("symbol", "") or "").strip().upper()
+        bias = str(ticker.get("bias", "") or "").strip().lower()
+        if has_recent_author_ticker_direction(source_id, symbol, bias, hours=cooldown_hours, db_path=db_path):
+            skipped.append(f"{symbol} {bias}")
+            continue
+        filtered.append(ticker)
+    if skipped:
+        logger.info("Skipped %d ticker view(s) due to cooldown: %s", len(skipped), ", ".join(skipped))
+    return filtered
+
+
 def _mark_posts_processed(source_id: str, posts: list[dict], content_chars: int, db_path: str, skip_reason: str | None = None):
     for post in posts:
         mark_processed(
@@ -374,6 +391,11 @@ async def _process_posts(
     has_tickers = len(tickers) >= 1
 
     if is_signal and confidence >= threshold and has_tickers:
+        tickers = _filter_cooldown_tickers(source_id, tickers, DEFAULT_TICKER_COOLDOWN_HOURS, db_path)
+        result["tickers"] = tickers
+        if not tickers:
+            logger.info("Signal fully skipped after ticker cooldown filtering (%.0f%%, %d post(s)): %s", confidence * 100, len(non_empty_posts), source_name)
+            return
         logger.info("Signal (%.0f%%, %d ticker(s), %d post(s)): %s", confidence * 100, len(tickers), len(non_empty_posts), source_name)
         contributing_numbers = _contributing_item_numbers(result, tickers, len(non_empty_posts))
         contributing_posts = [non_empty_posts[number - 1] for number in contributing_numbers]
