@@ -55,7 +55,7 @@ def test_render_single_message_under_limit():
     )
     msgs = render_messages("@source", "Post Title", "https://x.com/source/status/1", analysis)
     assert len(msgs) == 1
-    assert msgs[0].startswith("👤 <b>@source</b>")
+    assert msgs[0].startswith("\U0001f4a1 🟢 NVDA 🔴 INTC · 🗓 months — @source")
     assert "📰" not in msgs[0]
     assert "📝" not in msgs[0]
     assert "confidence" not in msgs[0]
@@ -93,7 +93,7 @@ def test_render_recent_mentions_under_ticker_line():
     )
     msg = render_messages("Source", "Post", "https://x.com/source/status/2", analysis)[0]
     assert "🟢 <b>WOLF</b> — 800 VDC acceleration" in msg
-    assert '2 recent mentions: <a href="https://t.me/c/123/10">Serenity</a> | <a href="https://x.com/jukan/status/1">Jukan</a>' in msg
+    assert '<i>Recent mentions - <a href="https://t.me/c/123/10">Serenity</a> | <a href="https://x.com/jukan/status/1">Jukan</a></i>' in msg
 
 
 def test_render_message_splits_between_tickers_when_too_long():
@@ -105,6 +105,7 @@ def test_render_message_splits_between_tickers_when_too_long():
         ]
     )
     msgs = render_messages("@source", "Post", "https://x.com/source/status/1", analysis)
+    assert msgs[0].startswith("💡 🟢 T0 🟢 T1 🟢 T2 +3 · ❔ unspecified — @source")
     assert len(msgs) > 1
     for msg in msgs:
         assert len(msg) <= TELEGRAM_MAX_MESSAGE_CHARS

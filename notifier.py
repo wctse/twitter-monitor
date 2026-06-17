@@ -8,11 +8,16 @@ logger = logging.getLogger(__name__)
 TELEGRAM_MAX_MESSAGE_CHARS = 4096
 _BIAS_ICON = {"bullish": "🟢", "bearish": "🔴", "neutral": "⚪"}
 _BIAS_ORDER = {"bullish": 0, "bearish": 1, "neutral": 2}
+_TIMEFRAME_ICON = {"intraday": "⚡", "minutes": "⚡", "hours": "⏱", "days": "📅", "weeks": "🗓", "months": "🗓", "quarters": "🗓", "years": "🗓"}
 _ADMIN_ONLY_PREFIX = "🔒 <b>[ADMIN ONLY]</b>\n"
 
 
 def _bias_icon(bias: str) -> str:
     return _BIAS_ICON.get(bias.lower(), "⚪")
+
+
+def _timeframe_icon(timeframe: str) -> str:
+    return _TIMEFRAME_ICON.get(timeframe.lower(), "❔")
 
 
 def prefix_admin_only_message(message: str) -> str:
@@ -36,8 +41,7 @@ def _format_recent_mentions(mentions: list[dict]) -> str:
             links.append(f'<a href="{url}">{name}</a>')
     if not links:
         return ""
-    label = "recent mention" if len(links) == 1 else "recent mentions"
-    return f"{len(links)} {label}: {' | '.join(links)}"
+    return f"<i>Recent mentions - {' | '.join(links)}</i>"
 
 
 def _format_ticker_line(t: dict) -> str:
@@ -69,9 +73,22 @@ def _format_post_links(post_url: str | list[str]) -> str:
     return "\n".join(f"🔗 {url}" for url in urls)
 
 
-def _build_header(source_name: str, post_url: str | list[str], summary: str) -> str:
+def _format_title(source_name: str, tickers: list[dict]) -> str:
+    ticker_parts = []
+    for ticker in tickers:
+        symbol = _ticker_symbol(ticker)
+        if symbol:
+            ticker_parts.append(f"{_bias_icon(str(ticker.get('bias', 'neutral')))} {escape(symbol)}")
+    ticker_summary = " ".join(ticker_parts[:3]) if ticker_parts else "—"
+    if len(ticker_parts) > 3:
+        ticker_summary = f"{ticker_summary} +{len(ticker_parts) - 3}"
+    timeframe = next((str(t.get("timeframe", "") or "").strip() for t in tickers if str(t.get("timeframe", "") or "").strip()), "unspecified")
+    return f"💡 {ticker_summary} · {_timeframe_icon(timeframe)} {escape(timeframe)} — {escape(source_name)}"
+
+
+def _build_header(source_name: str, post_url: str | list[str], summary: str, tickers: list[dict]) -> str:
     return (
-        f"👤 <b>{escape(source_name)}</b>\n"
+        f"{_format_title(source_name, tickers)}\n\n"
         f"{_format_post_links(post_url)}\n\n"
         f"<b>Summary:</b> {escape(summary)}\n\n"
         f"<b>Investment views:</b>"
@@ -87,7 +104,7 @@ def _render_message_chunks(
     summary = str(analysis.get("summary", ""))
     tickers = _sort_tickers(list(analysis.get("tickers", [])))
 
-    header = _build_header(source_name, post_url, summary)
+    header = _build_header(source_name, post_url, summary, tickers)
 
     if not tickers:
         return [{"text": f"{header}\n  (no specific tickers)", "symbols": []}]
